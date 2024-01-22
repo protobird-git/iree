@@ -297,7 +297,6 @@ iree_cc_binary(
     absl::log_initialize
     absl::strings
     tracy::worker
-    tsl::xplane
 )
 
 iree_cc_binary(
@@ -312,7 +311,6 @@ iree_cc_binary(
     absl::log
     absl::log_initialize
     tracy::worker
-    tsl::xplane
 )
 
 iree_cc_binary(
