@@ -258,13 +258,59 @@ iree_cc_binary(
   INSTALL_COMPONENT IREETools-Runtime    
 )
 
+iree_cc_library(
+  NAME
+    iree-prof-output
+  HRDS
+    "iree-prof-output.h"
+    "iree-prof-output-stdout.h"
+    "iree-prof-output-tracy.h"
+    "iree-prof-output-utils.h"
+    "iree-prof-output-xplane.h"
+  SRCS
+    "iree-prof-output.cc"
+    "iree-prof-output-stdout.cc"
+    "iree-prof-output-tracy.cc"
+    "iree-prof-output-utils.cc"
+    "iree-prof-output-xplane.cc"
+  DEPS
+    absl::flags
+    absl::flat_hash_map
+    absl::log
+    absl::status
+    absl::strings
+    absl::time
+    tracy::worker
+    tsl::xplane
+)
+
 iree_cc_binary(
   NAME
-    iree-tracy-print
+    iree-prof
   SRCS
-    "iree-tracy-print.cc"
+    "iree-prof.cc"
   DEPS
-    iree::base::internal::flags
+    ::iree-prof-output
+    absl::flags
+    absl::flags_parse
+    absl::log
+    absl::log_initialize
+    absl::strings
+    tracy::worker
+    tsl::xplane
+)
+
+iree_cc_binary(
+  NAME
+    iree-prof-convert
+  SRCS
+    "iree-prof-convert.cc"
+  DEPS
+    ::iree-prof-output
+    absl::flags
+    absl::flags_parse
+    absl::log
+    absl::log_initialize
     tracy::worker
     tsl::xplane
 )
