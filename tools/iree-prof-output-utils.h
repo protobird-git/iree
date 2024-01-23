@@ -34,6 +34,9 @@ struct TracyZoneFunctions<tracy::Worker::GpuSourceLocationZones> {
 const char* GetZoneName(const tracy::Worker& worker,
                         int16_t source_location_id);
 
+// Returns the thread name for the given tid.
+const char* GetThreadName(const tracy::Worker& worker, uint16_t tid);
+
 // Yields CPU of current thread for a short while, 100 milliseconds.
 void YieldCpu();
 

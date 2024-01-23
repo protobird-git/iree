@@ -26,6 +26,7 @@ class IreeProfOutputStdout : public IreeProfOutput {
   };
 
   IreeProfOutputStdout(const std::vector<std::string>& zone_substrs,
+                       const std::vector<std::string>& thread_substrs,
                        DurationUnit unit);
   ~IreeProfOutputStdout() override;
 
@@ -37,6 +38,7 @@ class IreeProfOutputStdout : public IreeProfOutput {
 
  private:
   const std::vector<std::string> zone_substrs_;
+  const std::vector<std::string> thread_substrs_;
   const DurationUnit unit_;
 };
 

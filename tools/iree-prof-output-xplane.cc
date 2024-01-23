@@ -38,7 +38,7 @@ void ToXplane(
       auto* xline = xplane.add_lines();
       xline->set_id(tid);
       xline->set_display_id(tid);
-      xline->set_name(worker.GetThreadName(worker.DecompressThread(tid)));
+      xline->set_name(GetThreadName(worker, tid));
       xline->set_display_name(xline->name());
       // Need to set xline->set_timestamp_ns() and xline->set_duration_ps()?
       xlines[tid] = xline;
