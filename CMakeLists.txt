@@ -904,6 +904,9 @@ include(flatbuffer_c_library)
 
 add_subdirectory(build_tools/third_party/llvm-project EXCLUDE_FROM_ALL)
 add_subdirectory(build_tools/third_party/tracy_client EXCLUDE_FROM_ALL)
+add_subdirectory(build_tools/third_party/tsl EXCLUDE_FROM_ALL)
+
+add_subdirectory(third_party/abseil-cpp EXCLUDE_FROM_ALL)
 
 iree_set_googletest_cmake_options()
 add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
