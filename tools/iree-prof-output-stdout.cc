@@ -6,12 +6,15 @@
 
 #include "tools/iree-prof-output-stdout.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <map>
 #include <vector>
 
+#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 #include "third_party/abseil-cpp/absl/status/status.h"
+#include "third_party/abseil-cpp/absl/strings/str_cat.h"
 #include "third_party/tracy/public/common/TracyProtocol.hpp"
 #include "third_party/tracy/server/TracyWorker.hpp"
 #include "tools/iree-prof-output-utils.h"
@@ -19,21 +22,29 @@
 namespace iree_prof {
 namespace {
 
+bool HasSubstr(absl::string_view str, const std::vector<std::string>& substrs) {
+  return std::find_if(
+             substrs.begin(), substrs.end(),
+             [str](const std::string& s) { return str.find(s) != str.npos; })
+             != substrs.end();
+}
+
 template <typename T>
 struct Zone {
-  int16_t source_location_id;
+  const char* name;
   const T* zone;
 };
 
 template <typename T>
-std::vector<Zone<T>> GetTopZones(
+std::vector<Zone<T>> GetZonesFilteredAndSorted(
+    const tracy::Worker& worker,
     const tracy::unordered_flat_map<int16_t, T>& zones,
-    int num_zones_to_return) {
+    const std::vector<std::string>& zone_substrs) {
   std::map<int, Zone<T>> ordered_map;
   for (const auto& z : zones) {
-    ordered_map[z.second.total] = Zone<T>{z.first, &z.second};
-    if (ordered_map.size() > num_zones_to_return) {
-      ordered_map.erase(ordered_map.begin());
+    const char* zone_name = GetZoneName(worker, z.first);
+    if (HasSubstr(zone_name, zone_substrs)) {
+      ordered_map[z.second.total] = Zone<T>{zone_name, &z.second};
     }
   }
 
@@ -55,9 +66,50 @@ const char* ArchToString(tracy::CpuArchitecture arch) {
   }
 }
 
+std::string GetDurationStr(int64_t duration_ns,
+                           IreeProfOutputStdout::DurationUnit unit) {
+  switch (unit) {
+    case IreeProfOutputStdout::DurationUnit::kNanoseconds:
+      return absl::StrCat(duration_ns, "ns");
+    case IreeProfOutputStdout::DurationUnit::kMicroseconds:
+      return absl::StrCat(static_cast<double>(duration_ns) / 1000, "us");
+    case IreeProfOutputStdout::DurationUnit::kSeconds:
+      return absl::StrCat(static_cast<double>(duration_ns) / 1000000000, "s");
+    case IreeProfOutputStdout::DurationUnit::kMilliseconds:
+    default:
+      return absl::StrCat(static_cast<double>(duration_ns) / 1000000, "ms");
+  }
+}
+
+template <typename T>
+void OutputToStdout(const tracy::Worker& worker,
+                    const Zone<T>& zone,
+                    absl::string_view header,
+                    IreeProfOutputStdout::DurationUnit unit) {
+  absl::flat_hash_map<uint16_t, int64_t> ns_per_thread;
+  TracyZoneFunctions<T> func;
+  for (const auto& t : zone.zone->zones) {
+    ns_per_thread[t.Thread()] +=
+        (t.Zone()->*func.end)() - (t.Zone()->*func.start)();
+  }
+
+  std::cout << header << zone.name
+            << ": count=" << zone.zone->zones.size()
+            << ", total=" << GetDurationStr(zone.zone->total, unit);
+  for (auto it : ns_per_thread) {
+    std::cout << ", " << worker.GetThreadName(worker.DecompressThread(it.first))
+              << "=" << GetDurationStr(it.second, unit);
+  }
+  std::cout << "\n";
+}
+
 }  // namespace
 
-IreeProfOutputStdout::IreeProfOutputStdout() = default;
+IreeProfOutputStdout::IreeProfOutputStdout(
+    const std::vector<std::string>& zone_substrs,
+    DurationUnit unit)
+    : zone_substrs_(zone_substrs), unit_(unit) {}
+
 IreeProfOutputStdout::~IreeProfOutputStdout() = default;
 
 absl::Status IreeProfOutputStdout::Output(tracy::Worker& worker) {
@@ -66,21 +118,17 @@ absl::Status IreeProfOutputStdout::Output(tracy::Worker& worker) {
             << "\n";
 
   std::cout << "[TRACY-CPU]   CPU Zones = " << worker.GetZoneCount() << "\n";
-  auto cpu_zones = GetTopZones(worker.GetSourceLocationZones(), 10);
+  auto cpu_zones = GetZonesFilteredAndSorted(
+      worker, worker.GetSourceLocationZones(), zone_substrs_);
   for (const auto& z : cpu_zones) {
-    std::cout << "[TRACY-CPU]         "
-              << GetZoneName(worker, z.source_location_id)
-              << ": total_ns=" << z.zone->total
-              << ", count=" << z.zone->zones.size() << "\n";
+    OutputToStdout(worker, z, "[TRACY-CPU]         ", unit_);
   }
 
   std::cout << "[TRACY-GPU]   GPU Zones = " << worker.GetGpuZoneCount() << "\n";
-  auto gpu_zones = GetTopZones(worker.GetGpuSourceLocationZones(), 10);
+  auto gpu_zones = GetZonesFilteredAndSorted(
+      worker, worker.GetGpuSourceLocationZones(), zone_substrs_);
   for (const auto& z : gpu_zones) {
-    std::cout << "[TRACY-GPU]         "
-              << GetZoneName(worker, z.source_location_id)
-              << ": total_ns=" << z.zone->total
-              << ", count=" << z.zone->zones.size() << "\n";
+    OutputToStdout(worker, z, "[TRACY-GPU]         ", unit_);
   }
 
   return absl::OkStatus();
