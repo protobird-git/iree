@@ -8,6 +8,7 @@
 #define IREE_PROF_OUTPUT_UTILS_H_
 
 #include <cstdint>
+#include <vector>
 
 #include "third_party/tracy/server/TracyWorker.hpp"
 
@@ -39,6 +40,10 @@ const char* GetThreadName(const tracy::Worker& worker, uint16_t tid);
 
 // Yields CPU of current thread for a short while, 100 milliseconds.
 void YieldCpu();
+
+// Initializes log and parses command line flags.
+// Returns all the remaining positional command line arguments.
+std::vector<char*> InitializeLogAndParseCommandLine(int argc, char* argv[]);
 
 }  // namespace iree_prof
 
