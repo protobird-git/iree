@@ -13,9 +13,29 @@
 
 namespace iree_prof {
 
+// Util templates to mitigate the difference between
+// tracy::Worker::SourceLocationZone and tracy::Worker::GpuSourceLocationZone.
+template <typename E>
+using TimestampFunc = int64_t (E::*)() const;
+
+template <typename T>
+struct TracyZoneFunctions {
+  TimestampFunc<tracy::ZoneEvent> start = &tracy::ZoneEvent::Start;
+  TimestampFunc<tracy::ZoneEvent> end = &tracy::ZoneEvent::End;
+};
+
+template <>
+struct TracyZoneFunctions<tracy::Worker::GpuSourceLocationZones> {
+  TimestampFunc<tracy::GpuEvent> start = &tracy::GpuEvent::GpuStart;
+  TimestampFunc<tracy::GpuEvent> end = &tracy::GpuEvent::GpuEnd;
+};
+
 // Returns the zone name associated to a source location ID in a trace worker.
 const char* GetZoneName(const tracy::Worker& worker,
                         int16_t source_location_id);
+
+// Returns the thread name for the given tid.
+const char* GetThreadName(const tracy::Worker& worker, uint16_t tid);
 
 // Yields CPU of current thread for a short while, 100 milliseconds.
 void YieldCpu();
