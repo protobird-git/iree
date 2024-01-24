@@ -243,8 +243,11 @@ iree_cc_library(
     "iree-prof-output-xplane.cc"
   DEPS
     absl::flags
+    absl::flags_parse
     absl::flat_hash_map
     absl::log
+    absl::log_initialize
+    absl::log_severity
     absl::status
     absl::strings
     absl::time
@@ -260,11 +263,10 @@ iree_cc_binary(
   DEPS
     ::iree-prof-output
     absl::flags
-    absl::flags_parse
     absl::log
-    absl::log_initialize
     absl::strings
     tracy::worker
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,absl::log_flags>
 )
 
 iree_cc_binary(
@@ -275,10 +277,9 @@ iree_cc_binary(
   DEPS
     ::iree-prof-output
     absl::flags
-    absl::flags_parse
     absl::log
-    absl::log_initialize
     tracy::worker
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,absl::log_flags>
 )
 
 iree_cc_binary(
