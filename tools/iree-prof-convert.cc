@@ -9,8 +9,6 @@
 #include <vector>
 
 #include "third_party/abseil-cpp/absl/flags/flag.h"
-#include "third_party/abseil-cpp/absl/flags/parse.h"
-#include "third_party/abseil-cpp/absl/log/initialize.h"
 #include "third_party/abseil-cpp/absl/log/log.h"
 #include "third_party/tracy/server/TracyFileRead.hpp"
 #include "third_party/tracy/server/TracyWorker.hpp"
@@ -21,9 +19,8 @@ ABSL_FLAG(std::string, input_tracy_file, "",
           "Tracy file to read. Ignored if executable command is given.");
 
 int main(int argc, char** argv) {
-  std::vector<char*> remain_args = absl::ParseCommandLine(argc, argv);
-  absl::InitializeLog();
-
+  std::vector<char*> remain_args =
+      iree_prof::InitializeLogAndParseCommandLine(argc, argv);
   if (remain_args.empty()) {
     LOG(WARNING) << remain_args.size() << " unknown flags exist.";
   }
