@@ -15,8 +15,6 @@
 #include <vector>
 
 #include "third_party/abseil-cpp/absl/flags/flag.h"
-#include "third_party/abseil-cpp/absl/flags/parse.h"
-#include "third_party/abseil-cpp/absl/log/initialize.h"
 #include "third_party/abseil-cpp/absl/log/log.h"
 #include "third_party/abseil-cpp/absl/strings/str_cat.h"
 #include "third_party/tracy/server/TracyWorker.hpp"
@@ -41,7 +39,8 @@ absl::Status RunExecutable(char** argv) {
     std::string tracy_port_str = absl::StrCat(absl::GetFlag(FLAGS_tracy_port));
     setenv("TRACY_NO_EXIT", "1", /*overwrite=*/1);
     setenv("TRACY_PORT", tracy_port_str.c_str(), /*overwrite=*/1);
-    execv(argv[0], argv);
+    LOG(INFO) << "Executing " << argv[0];
+    execvp(argv[0], argv);
     exit(errno);  // Not expected to be reached.
   }
 
@@ -71,8 +70,8 @@ absl::Status RunExecutable(char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::vector<char*> remain_args = absl::ParseCommandLine(argc, argv);
-  absl::InitializeLog();
+  std::vector<char*> remain_args =
+      iree_prof::InitializeLogAndParseCommandLine(argc, argv);
 
   std::unique_ptr<tracy::Worker> worker;
   // Note that remain_args[0] has argv[0].
@@ -81,6 +80,9 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
 
+  // argv[] must end with nullptr.
+  remain_args.push_back(nullptr);
+  // remain_args[0] is this program name, i.e. iree-prof.
   auto status = RunExecutable(&remain_args[1]);
   if (!status.ok()) {
     LOG(ERROR) << status;
