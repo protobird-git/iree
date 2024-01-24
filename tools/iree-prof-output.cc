@@ -7,6 +7,7 @@
 #include "tools/iree-prof-output.h"
 
 #include <string>
+#include <vector>
 
 #include "third_party/abseil-cpp/absl/flags/flag.h"
 #include "third_party/abseil-cpp/absl/log/log.h"
@@ -22,6 +23,15 @@ ABSL_FLAG(std::string, output_xplane_file, "",
           "Xplane file to write as the output of execution or conversion.");
 ABSL_FLAG(bool, output_stdout, true,
           "Whether to print Tracy result to stdout.");
+ABSL_FLAG(std::vector<std::string>, zone_substrs, {"iree_hal_buffer_map_"},
+          "Comma-separated substrings of tracy zones to output to stdout. "
+          "If empty, no zones will be output.");
+ABSL_FLAG(std::vector<std::string>, thread_substrs, {"iree-worker-"},
+          "Comma-separated substrings of threads to output to stdout. "
+          "If empty, all thread including main threads will be output.");
+ABSL_FLAG(std::string, duration_unit, "milliseconds",
+          "Unit of duration of zone to output to stdout. It must be one of "
+          "seconds(s), millseconds(ms), microseconds(us), or nanoseconds(ns).");
 
 namespace iree_prof {
 namespace {
@@ -32,11 +42,31 @@ void LogStatusIfError(const absl::Status& status) {
   }
 }
 
+IreeProfOutputStdout::DurationUnit ToUnit(const absl::string_view flag) {
+  if (flag == "seconds" || flag == "s") {
+    return IreeProfOutputStdout::DurationUnit::kSeconds;
+  }
+  if (flag == "milliseconds" || flag == "ms") {
+    return IreeProfOutputStdout::DurationUnit::kMilliseconds;
+  }
+  if (flag == "microseconds" || flag == "us") {
+    return IreeProfOutputStdout::DurationUnit::kMicroseconds;
+  }
+  if (flag == "nanoseconds" || flag == "ns") {
+    return IreeProfOutputStdout::DurationUnit::kNanoseconds;
+  }
+  return IreeProfOutputStdout::DurationUnit::kNotSpecified;
+}
+
 }  // namespace
 
 void Output(tracy::Worker& worker) {
   if (absl::GetFlag(FLAGS_output_stdout)) {
-    LogStatusIfError(IreeProfOutputStdout().Output(worker));
+    LogStatusIfError(
+        IreeProfOutputStdout(absl::GetFlag(FLAGS_zone_substrs),
+                             absl::GetFlag(FLAGS_thread_substrs),
+                             ToUnit(absl::GetFlag(FLAGS_duration_unit)))
+        .Output(worker));
   }
 
   std::string output_tracy_file = absl::GetFlag(FLAGS_output_tracy_file);
