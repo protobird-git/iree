@@ -18,6 +18,10 @@ const char* GetZoneName(const tracy::Worker& worker,
   return worker.GetString(srcloc.name.active ? srcloc.name : srcloc.function);
 }
 
+const char* GetThreadName(const tracy::Worker& worker, uint16_t tid) {
+  return worker.GetThreadName(worker.DecompressThread(tid));
+}
+
 void YieldCpu() {
   absl::SleepFor(absl::Milliseconds(100));
 }
