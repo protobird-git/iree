@@ -15,6 +15,7 @@
 #include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 #include "third_party/abseil-cpp/absl/status/status.h"
 #include "third_party/abseil-cpp/absl/strings/str_cat.h"
+#include "third_party/abseil-cpp/absl/strings/string_view.h"
 #include "third_party/tracy/public/common/TracyProtocol.hpp"
 #include "third_party/tracy/server/TracyWorker.hpp"
 #include "tools/iree-prof-output-utils.h"
@@ -57,37 +58,30 @@ std::string GetDurationStr(int64_t duration_ns,
   }
 }
 
-// Returns the duration per thread, i.e from the earliest start to the latest
-// end of zones running on each thread.
+// Returns the duration per thread, i.e merged durations of all zones running on
+// each thread.
 template <typename T>
 absl::flat_hash_map<int, int64_t> GetThreadDurations(
     const tracy::Worker& worker,
     const tracy::unordered_flat_map<int16_t, T>& zones,
     const std::vector<std::string>& thread_substrs) {
-  absl::flat_hash_map<int, int64_t> earliest_starts;
-  absl::flat_hash_map<int, int64_t> latest_ends;
   TracyZoneFunctions<T> func;
+  absl::flat_hash_map<int, std::vector<int64_t>> merged_durations;
   for (const auto& z : zones) {
     for (const auto& t : z.second.zones) {
-      auto tid = t.Thread();
-      auto start = (t.Zone()->*func.start)();
-      if (!earliest_starts.contains(tid) || start < earliest_starts[tid]) {
-        earliest_starts[tid] = start;
-      }
-      auto end = (t.Zone()->*func.end)();
-      if (!latest_ends.contains(tid) || end > latest_ends[tid]) {
-        latest_ends[tid] = end;
-      }
+      MergeDuration((t.Zone()->*func.start)(), (t.Zone()->*func.end)(),
+                    merged_durations[func.GetThreadId(t)]);
     }
   }
 
   absl::flat_hash_map<int, int64_t> thread_durations;
-  for (auto& it : earliest_starts) {
+  for (auto& it : merged_durations) {
     // Filters threads matched with substrings in thread_substrs if not empty.
     // If empty, add all.
     if (thread_substrs.empty() ||
-        HasSubstr(GetThreadName(worker, it.first), thread_substrs)) {
-      thread_durations[it.first] = latest_ends[it.first] - it.second;
+        HasSubstr(func.GetThreadName(worker, it.first), thread_substrs)) {
+      thread_durations[it.first] =
+          SumMergedDuration(merged_durations.at(it.first));
     }
   }
   return thread_durations;
@@ -114,8 +108,8 @@ std::vector<Zone<T>> GetZonesFilteredAndSorted(
     const tracy::unordered_flat_map<int16_t, T>& zones,
     const std::vector<std::string>& zone_substrs,
     const absl::flat_hash_map<int, int64_t>& thread_durations) {
-  std::vector<Zone<T>> zones_filtered;
   TracyZoneFunctions<T> func;
+  std::vector<Zone<T>> zones_filtered;
   for (const auto& z : zones) {
     const char* zone_name = GetZoneName(worker, z.first);
     if (!HasSubstr(zone_name, zone_substrs)) {
@@ -125,7 +119,7 @@ std::vector<Zone<T>> GetZonesFilteredAndSorted(
     int64_t total_count = 0;
     int64_t total_duration = 0;
     for (const auto& t : z.second.zones) {
-      if (thread_durations.contains(t.Thread())) {
+      if (thread_durations.contains(func.GetThreadId(t))) {
         ++total_count;
         total_duration += (t.Zone()->*func.end)() - (t.Zone()->*func.start)();
       }
@@ -151,7 +145,7 @@ std::vector<Zone<T>> GetZonesFilteredAndSorted(
 // Returns the index of |thread_name| in |headers| which is effectivtly the
 // column index of the given thread in the output table.
 int GetColOfThread(const std::vector<std::string>& headers,
-                   const char* thread_name) {
+                   absl::string_view thread_name) {
   for (int i = 3; i < headers.size(); ++i) {
     if (headers[i] == thread_name) {
       return i;
@@ -176,10 +170,10 @@ void FillOutputTableRowWithZone(
     IreeProfOutputStdout::DurationUnit unit,
     const std::vector<std::string>& headers,
     std::vector<std::string>& output_row) {
-  absl::flat_hash_map<uint16_t, int64_t> ns_per_thread;
   TracyZoneFunctions<T> func;
+  absl::flat_hash_map<int, int64_t> ns_per_thread;
   for (const auto& t : zone.zone->zones) {
-    auto tid = t.Thread();
+    auto tid = func.GetThreadId(t);
     if (thread_durations.contains(tid)) {
       ns_per_thread[tid] += (t.Zone()->*func.end)() - (t.Zone()->*func.start)();
     }
@@ -191,7 +185,7 @@ void FillOutputTableRowWithZone(
       GetDurationStr(zone.total_duration, unit),
       GetPercentage(zone.total_duration, total_duration));
   for (auto it : ns_per_thread) {
-    output_row[GetColOfThread(headers, GetThreadName(worker, it.first))] =
+    output_row[GetColOfThread(headers, func.GetThreadName(worker, it.first))] =
         absl::StrCat(GetDurationStr(it.second, unit),
                      GetPercentage(it.second, thread_durations.at(it.first)));
   }
@@ -207,6 +201,7 @@ std::vector<std::vector<std::string>> BuildOutputTable(
     int64_t total_duration,
     const absl::flat_hash_map<int, int64_t>& thread_durations,
     IreeProfOutputStdout::DurationUnit unit) {
+  TracyZoneFunctions<T> func;
   auto num_rows = zones.size() + 2;
   auto num_cols = thread_durations.size() + 3;
 
@@ -218,7 +213,7 @@ std::vector<std::vector<std::string>> BuildOutputTable(
   headers.push_back("Count");
   headers.push_back("Total");
   for (const auto& it : thread_durations) {
-    headers.push_back(GetThreadName(worker, it.first));
+    headers.push_back(func.GetThreadName(worker, it.first));
   }
   std::sort(headers.begin() + 3, headers.end());
 
@@ -228,7 +223,7 @@ std::vector<std::vector<std::string>> BuildOutputTable(
   // totals[1] is empty since count is not a duration.
   totals[2] = GetDurationStr(total_duration, unit);
   for (const auto& it : thread_durations) {
-    totals[GetColOfThread(headers, GetThreadName(worker, it.first))] =
+    totals[GetColOfThread(headers, func.GetThreadName(worker, it.first))] =
         GetDurationStr(it.second, unit);
   }
 

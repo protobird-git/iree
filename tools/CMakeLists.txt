@@ -242,6 +242,7 @@ iree_cc_library(
     "iree-prof-output-utils.cc"
     "iree-prof-output-xplane.cc"
   DEPS
+    absl::check
     absl::flags
     absl::flags_parse
     absl::flat_hash_map
@@ -253,6 +254,17 @@ iree_cc_library(
     absl::time
     tracy::worker
     tsl::xplane
+)
+
+# iree_cc_test doesn't work in this directory.
+iree_cc_binary(
+  NAME
+    iree-prof-output-test
+  SRCS
+    "iree-prof-output-test.cc"
+  DEPS
+    ::iree-prof-output
+    iree::testing::gtest
 )
 
 iree_cc_binary(
