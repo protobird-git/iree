@@ -58,31 +58,33 @@ std::string GetDurationStr(int64_t duration_ns,
   }
 }
 
-// Returns the duration per thread, i.e merged durations of all zones running on
-// each thread.
+// Returns the duration per thread, i.e merged durations of all top-level zones
+// running on each thread.
 template <typename T>
 absl::flat_hash_map<int, int64_t> GetThreadDurations(
     const tracy::Worker& worker,
     const tracy::unordered_flat_map<int16_t, T>& zones,
     const std::vector<std::string>& thread_substrs) {
-  TracyZoneFunctions<T> func;
-  absl::flat_hash_map<int, std::vector<int64_t>> merged_durations;
+  absl::flat_hash_map<int, int64_t> thread_durations;
   for (const auto& z : zones) {
     for (const auto& t : z.second.zones) {
-      MergeDuration((t.Zone()->*func.start)(), (t.Zone()->*func.end)(),
-                    merged_durations[func.GetThreadId(t)]);
+      auto tid = GetThreadId(t);
+      if (!thread_durations.contains(tid)) {
+        thread_durations[tid] = GetThreadDuration<T>(worker, tid);
+      }
     }
   }
 
-  absl::flat_hash_map<int, int64_t> thread_durations;
-  for (auto& it : merged_durations) {
-    // Filters threads matched with substrings in thread_substrs if not empty.
-    // If empty, add all.
-    if (thread_substrs.empty() ||
-        HasSubstr(func.GetThreadName(worker, it.first), thread_substrs)) {
-      thread_durations[it.first] =
-          SumMergedDuration(merged_durations.at(it.first));
+  // Filters threads matched with substrings in thread_substrs if not empty.
+  // If empty, add all.
+  if (!thread_substrs.empty()) {
+    absl::flat_hash_map<int, int64_t> filtered_thread_durations;
+    for (const auto& d : thread_durations) {
+      if (HasSubstr(GetThreadName<T>(worker, d.first), thread_substrs)) {
+        filtered_thread_durations[d.first] = d.second;
+      }
     }
+    thread_durations.swap(filtered_thread_durations);
   }
   return thread_durations;
 }
@@ -108,7 +110,6 @@ std::vector<Zone<T>> GetZonesFilteredAndSorted(
     const tracy::unordered_flat_map<int16_t, T>& zones,
     const std::vector<std::string>& zone_substrs,
     const absl::flat_hash_map<int, int64_t>& thread_durations) {
-  TracyZoneFunctions<T> func;
   std::vector<Zone<T>> zones_filtered;
   for (const auto& z : zones) {
     const char* zone_name = GetZoneName(worker, z.first);
@@ -119,9 +120,9 @@ std::vector<Zone<T>> GetZonesFilteredAndSorted(
     int64_t total_count = 0;
     int64_t total_duration = 0;
     for (const auto& t : z.second.zones) {
-      if (thread_durations.contains(func.GetThreadId(t))) {
+      if (thread_durations.contains(GetThreadId(t))) {
         ++total_count;
-        total_duration += (t.Zone()->*func.end)() - (t.Zone()->*func.start)();
+        total_duration += GetEventDuration(*t.Zone());
       }
     }
 
@@ -170,12 +171,11 @@ void FillOutputTableRowWithZone(
     IreeProfOutputStdout::DurationUnit unit,
     const std::vector<std::string>& headers,
     std::vector<std::string>& output_row) {
-  TracyZoneFunctions<T> func;
   absl::flat_hash_map<int, int64_t> ns_per_thread;
   for (const auto& t : zone.zone->zones) {
-    auto tid = func.GetThreadId(t);
+    auto tid = GetThreadId(t);
     if (thread_durations.contains(tid)) {
-      ns_per_thread[tid] += (t.Zone()->*func.end)() - (t.Zone()->*func.start)();
+      ns_per_thread[tid] += GetEventDuration(*t.Zone());
     }
   }
 
@@ -185,7 +185,7 @@ void FillOutputTableRowWithZone(
       GetDurationStr(zone.total_duration, unit),
       GetPercentage(zone.total_duration, total_duration));
   for (auto it : ns_per_thread) {
-    output_row[GetColOfThread(headers, func.GetThreadName(worker, it.first))] =
+    output_row[GetColOfThread(headers, GetThreadName<T>(worker, it.first))] =
         absl::StrCat(GetDurationStr(it.second, unit),
                      GetPercentage(it.second, thread_durations.at(it.first)));
   }
@@ -201,7 +201,6 @@ std::vector<std::vector<std::string>> BuildOutputTable(
     int64_t total_duration,
     const absl::flat_hash_map<int, int64_t>& thread_durations,
     IreeProfOutputStdout::DurationUnit unit) {
-  TracyZoneFunctions<T> func;
   auto num_rows = zones.size() + 2;
   auto num_cols = thread_durations.size() + 3;
 
@@ -213,7 +212,7 @@ std::vector<std::vector<std::string>> BuildOutputTable(
   headers.push_back("Count");
   headers.push_back("Total");
   for (const auto& it : thread_durations) {
-    headers.push_back(func.GetThreadName(worker, it.first));
+    headers.push_back(GetThreadName<T>(worker, it.first));
   }
   std::sort(headers.begin() + 3, headers.end());
 
@@ -223,7 +222,7 @@ std::vector<std::vector<std::string>> BuildOutputTable(
   // totals[1] is empty since count is not a duration.
   totals[2] = GetDurationStr(total_duration, unit);
   for (const auto& it : thread_durations) {
-    totals[GetColOfThread(headers, func.GetThreadName(worker, it.first))] =
+    totals[GetColOfThread(headers, GetThreadName<T>(worker, it.first))] =
         GetDurationStr(it.second, unit);
   }
 
@@ -297,17 +296,31 @@ IreeProfOutputStdout::IreeProfOutputStdout(
 IreeProfOutputStdout::~IreeProfOutputStdout() = default;
 
 absl::Status IreeProfOutputStdout::Output(tracy::Worker& worker) {
-  std::cout << "[TRACY    ] CaptureName: " << worker.GetCaptureName() << "\n";
-  std::cout << "[TRACY    ]     CpuArch: " << ArchToString(worker.GetCpuArch())
+  std::cout << "[TRACY    ]  CaptureName: " << worker.GetCaptureName() << "\n";
+  std::cout << "[TRACY    ]      CpuArch: " << ArchToString(worker.GetCpuArch())
             << "\n";
 
-  std::cout << "[TRACY-CPU]   CPU Zones: " << worker.GetZoneCount() << "\n";
-  OutputToStdout(worker, worker.GetSourceLocationZones(), zone_substrs_,
-                 thread_substrs_, "[TRACY-CPU]", unit_);
+  if (!worker.GetThreadData().empty()) {
+    std::cout << "[TRACY    ]\n";
+    std::cout << "[TRACY-CPU]  CPU Threads: " << worker.GetThreadData().size()
+              << "\n";
+    std::cout << "[TRACY-CPU]    CPU Zones: " << worker.GetZoneCount() << "\n";
+    OutputToStdout(worker, worker.GetSourceLocationZones(), zone_substrs_,
+                   thread_substrs_, "[TRACY-CPU]", unit_);
+  }
 
-  std::cout << "[TRACY-GPU]   GPU Zones = " << worker.GetGpuZoneCount() << "\n";
-  OutputToStdout(worker, worker.GetGpuSourceLocationZones(), zone_substrs_,
-                 thread_substrs_, "[TRACY-GPU]", unit_);
+  if (!worker.GetGpuData().empty()) {
+    std::cout << "[TRACY    ]\n";
+    std::cout << "[TRACY-GPU] GPU Contexts: " << worker.GetGpuData().size();
+    for (const auto& d : worker.GetGpuData()) {
+      std::cout << ", " << worker.GetString(d->name);
+    }
+    std::cout << "\n";
+    std::cout << "[TRACY-GPU]    GPU Zones: " << worker.GetGpuZoneCount()
+              << "\n";
+    OutputToStdout(worker, worker.GetGpuSourceLocationZones(), zone_substrs_,
+                   thread_substrs_, "[TRACY-GPU]", unit_);
+  }
 
   return absl::OkStatus();
 }

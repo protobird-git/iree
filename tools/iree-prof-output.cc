@@ -15,7 +15,6 @@
 #include "third_party/tracy/server/TracyWorker.hpp"
 #include "tools/iree-prof-output-stdout.h"
 #include "tools/iree-prof-output-tracy.h"
-#include "tools/iree-prof-output-utils.h"
 #include "tools/iree-prof-output-xplane.h"
 
 ABSL_FLAG(std::string, output_tracy_file, "",

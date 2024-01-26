@@ -11,61 +11,46 @@
 #include <string>
 #include <vector>
 
-#include "third_party/abseil-cpp/absl/strings/str_cat.h"
-#include "third_party/abseil-cpp/absl/strings/string_view.h"
 #include "third_party/tracy/server/TracyWorker.hpp"
 
 namespace iree_prof {
 
-// Util templates to mitigate the difference between
-// tracy::Worker::SourceLocationZone and tracy::Worker::GpuSourceLocationZone.
-template <typename E>
-using TimestampFunc = int64_t (E::*)() const;
+// Polymorphizm functions for CPU and GPU zones.
+int64_t GetEventStart(const tracy::ZoneEvent& event);
+int64_t GetEventStart(const tracy::GpuEvent& event);
+
+int64_t GetEventEnd(const tracy::ZoneEvent& event);
+int64_t GetEventEnd(const tracy::GpuEvent& event);
 
 template <typename T>
-struct TracyZoneFunctions {
-  TimestampFunc<tracy::ZoneEvent> start = &tracy::ZoneEvent::Start;
-  TimestampFunc<tracy::ZoneEvent> end = &tracy::ZoneEvent::End;
+int64_t GetEventDuration(const T& event) {
+  return GetEventEnd(event) - GetEventStart(event);
+}
 
-  int GetThreadId(const tracy::Worker::ZoneThreadData& t) { return t.Thread(); }
+int GetThreadId(const tracy::Worker::ZoneThreadData& t);
+int GetThreadId(const tracy::Worker::GpuZoneThreadData& t);
 
-  std::string GetThreadName(const tracy::Worker& worker, int tid) {
-    return worker.GetThreadName(worker.DecompressThread(tid));
-  }
-};
-
+template <typename T>
+std::string GetThreadName(const tracy::Worker& worker, int thread_id);
 template <>
-struct TracyZoneFunctions<tracy::Worker::GpuSourceLocationZones> {
-  TimestampFunc<tracy::GpuEvent> start = &tracy::GpuEvent::GpuStart;
-  TimestampFunc<tracy::GpuEvent> end = &tracy::GpuEvent::GpuEnd;
+std::string GetThreadName<tracy::Worker::SourceLocationZones>(
+    const tracy::Worker& worker, int thread_id);
+template <>
+std::string GetThreadName<tracy::Worker::GpuSourceLocationZones>(
+    const tracy::Worker& worker, int thread_id);
 
-  // Negates the actual thread ID to distinguish it from one in CPU zones.
-  int GetThreadId(const tracy::Worker::GpuZoneThreadData& t) {
-    return -static_cast<int>(t.Thread());
-  }
-
-  std::string GetThreadName(const tracy::Worker& worker, int tid) {
-    return absl::StrCat("gpu-thread-", -tid);
-  }
-};
+template <typename T>
+int64_t GetThreadDuration(const tracy::Worker& worker, int thread_id);
+template <>
+int64_t GetThreadDuration<tracy::Worker::SourceLocationZones>(
+    const tracy::Worker& worker, int thread_id);
+template <>
+int64_t GetThreadDuration<tracy::Worker::GpuSourceLocationZones>(
+    const tracy::Worker& worker, int thread_id);
 
 // Returns the zone name associated to a source location ID in a trace worker.
 const char* GetZoneName(const tracy::Worker& worker,
                         int16_t source_location_id);
-
-// Merges a duration, i.e. |end| - |start| into merged_duration vector which
-// consists of starts and ends. For example,
-// 1) start = 1, end = 3, merged = empty        -> result = {1, 3}
-// 2) start = 6, end = 8, merged = {1, 3}       -> result = {1, 3, 6, 8}
-// 3) start = 2, end = 7, merged = {1, 3, 6, 8} -> result = {1, 8}
-// 4) start = 7, end = 10, merged = {1, 8}      -> result = {1, 10}
-// 5) start = 10, end = 11, merged = {1, 10}    -> result = {1, 11}
-// A merged duration is a sorted vector of pairs of starts and ends.
-void MergeDuration(int64_t start, int64_t end, std::vector<int64_t>& merged);
-
-// Gets the total duration from merged durations, i.e a vector of pairs of
-// starts and ends.
-int64_t SumMergedDuration(const std::vector<int64_t>& merged);
 
 // Yields CPU of current thread for a short while, 100 milliseconds.
 void YieldCpu();

@@ -11,7 +11,6 @@
 
 #include "build_tools/third_party/tsl/xplane.pb.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
-#include "third_party/abseil-cpp/absl/log/log.h"
 #include "third_party/abseil-cpp/absl/strings/str_cat.h"
 #include "third_party/abseil-cpp/absl/strings/string_view.h"
 #include "third_party/tracy/server/TracyWorker.hpp"
@@ -32,14 +31,13 @@ void ToXplane(
   event_metadata.set_name(GetZoneName(worker, zone_id));
   event_metadata.set_display_name(event_metadata.name());
 
-  TracyZoneFunctions<T> func;
   for (const auto& t : zone.zones) {
-    auto tid = func.GetThreadId(t);
+    auto tid = GetThreadId(t);
     if (!xlines.contains(tid)) {
       auto* xline = xplane.add_lines();
       xline->set_id(tid);
       xline->set_display_id(tid);
-      xline->set_name(func.GetThreadName(worker, tid));
+      xline->set_name(GetThreadName<T>(worker, tid));
       xline->set_display_name(xline->name());
       // Need to set xline->set_timestamp_ns() and xline->set_duration_ps()?
       xlines[tid] = xline;
@@ -47,8 +45,8 @@ void ToXplane(
 
     auto* event = xlines[tid]->add_events();
     event->set_metadata_id(zone_id);
-    event->set_offset_ps((t.Zone()->*func.start)() * 1000);
-    event->set_duration_ps((t.Zone()->*func.end)() * 1000 - event->offset_ps());
+    event->set_offset_ps(GetEventStart(*t.Zone()) * 1000);
+    event->set_duration_ps(GetEventDuration(*t.Zone()) * 1000);
   }
 }
 
