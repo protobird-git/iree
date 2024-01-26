@@ -8,35 +8,51 @@
 #define IREE_PROF_OUTPUT_UTILS_H_
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "third_party/tracy/server/TracyWorker.hpp"
 
 namespace iree_prof {
 
-// Util templates to mitigate the difference between
-// tracy::Worker::SourceLocationZone and tracy::Worker::GpuSourceLocationZone.
-template <typename E>
-using TimestampFunc = int64_t (E::*)() const;
+// Polymorphizm functions for CPU and GPU zones.
+int64_t GetEventStart(const tracy::ZoneEvent& event);
+int64_t GetEventStart(const tracy::GpuEvent& event);
+
+int64_t GetEventEnd(const tracy::ZoneEvent& event);
+int64_t GetEventEnd(const tracy::GpuEvent& event);
 
 template <typename T>
-struct TracyZoneFunctions {
-  TimestampFunc<tracy::ZoneEvent> start = &tracy::ZoneEvent::Start;
-  TimestampFunc<tracy::ZoneEvent> end = &tracy::ZoneEvent::End;
-};
+int64_t GetEventDuration(const T& event) {
+  return GetEventEnd(event) - GetEventStart(event);
+}
 
+int GetThreadId(const tracy::Worker::ZoneThreadData& t);
+int GetThreadId(const tracy::Worker::GpuZoneThreadData& t);
+
+template <typename T>
+std::string GetThreadName(const tracy::Worker& worker, int thread_id);
 template <>
-struct TracyZoneFunctions<tracy::Worker::GpuSourceLocationZones> {
-  TimestampFunc<tracy::GpuEvent> start = &tracy::GpuEvent::GpuStart;
-  TimestampFunc<tracy::GpuEvent> end = &tracy::GpuEvent::GpuEnd;
-};
+std::string GetThreadName<tracy::Worker::SourceLocationZones>(
+    const tracy::Worker& worker, int thread_id);
+template <>
+std::string GetThreadName<tracy::Worker::GpuSourceLocationZones>(
+    const tracy::Worker& worker, int thread_id);
+
+// Returns the total duration of the thread of |thread_id|. It is the sum of
+// durations of top-level zones.
+template <typename T>
+int64_t GetThreadDuration(const tracy::Worker& worker, int thread_id);
+template <>
+int64_t GetThreadDuration<tracy::Worker::SourceLocationZones>(
+    const tracy::Worker& worker, int thread_id);
+template <>
+int64_t GetThreadDuration<tracy::Worker::GpuSourceLocationZones>(
+    const tracy::Worker& worker, int thread_id);
 
 // Returns the zone name associated to a source location ID in a trace worker.
 const char* GetZoneName(const tracy::Worker& worker,
                         int16_t source_location_id);
-
-// Returns the thread name for the given tid.
-const char* GetThreadName(const tracy::Worker& worker, uint16_t tid);
 
 // Yields CPU of current thread for a short while, 100 milliseconds.
 void YieldCpu();
