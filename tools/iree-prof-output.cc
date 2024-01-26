@@ -23,10 +23,11 @@ ABSL_FLAG(std::string, output_xplane_file, "",
           "Xplane file to write as the output of execution or conversion.");
 ABSL_FLAG(bool, output_stdout, true,
           "Whether to print Tracy result to stdout.");
-ABSL_FLAG(std::vector<std::string>, zone_substrs, {"iree_hal_buffer_map_"},
+ABSL_FLAG(std::vector<std::string>, zone_substrs,
+          std::vector<std::string>({"iree_hal_buffer_map_", "_dispatch_"}),
           "Comma-separated substrings of tracy zones to output to stdout. "
           "If empty, no zones will be output.");
-ABSL_FLAG(std::vector<std::string>, thread_substrs, {"iree-worker-"},
+ABSL_FLAG(std::vector<std::string>, thread_substrs, {},
           "Comma-separated substrings of threads to output to stdout. "
           "If empty, all thread including main threads will be output.");
 ABSL_FLAG(std::string, duration_unit, "milliseconds",
