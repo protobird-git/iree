@@ -25,20 +25,19 @@ void ToXplane(
     int64_t zone_id,
     const T& zone,
     tensorflow::profiler::XPlane& xplane,
-    absl::flat_hash_map<uint16_t, tensorflow::profiler::XLine*>& xlines) {
+    absl::flat_hash_map<int, tensorflow::profiler::XLine*>& xlines) {
   auto& event_metadata = (*xplane.mutable_event_metadata())[zone_id];
   event_metadata.set_id(zone_id);
   event_metadata.set_name(GetZoneName(worker, zone_id));
   event_metadata.set_display_name(event_metadata.name());
 
-  TracyZoneFunctions<T> func;
   for (const auto& t : zone.zones) {
-    auto tid = t.Thread();
+    auto tid = GetThreadId(t);
     if (!xlines.contains(tid)) {
       auto* xline = xplane.add_lines();
       xline->set_id(tid);
       xline->set_display_id(tid);
-      xline->set_name(GetThreadName(worker, tid));
+      xline->set_name(GetThreadName<T>(worker, tid));
       xline->set_display_name(xline->name());
       // Need to set xline->set_timestamp_ns() and xline->set_duration_ps()?
       xlines[tid] = xline;
@@ -46,8 +45,8 @@ void ToXplane(
 
     auto* event = xlines[tid]->add_events();
     event->set_metadata_id(zone_id);
-    event->set_offset_ps((t.Zone()->*func.start)() * 1000);
-    event->set_duration_ps((t.Zone()->*func.end)() * 1000 - event->offset_ps());
+    event->set_offset_ps(GetEventStart(*t.Zone()) * 1000);
+    event->set_duration_ps(GetEventDuration(*t.Zone()) * 1000);
   }
 }
 
@@ -59,7 +58,7 @@ tensorflow::profiler::XSpace ToXplane(const tracy::Worker& worker) {
 
   // XLine corresponds to each Thread.
   // XEvent corresponds to each Zone.
-  absl::flat_hash_map<uint16_t, tensorflow::profiler::XLine*> xlines;
+  absl::flat_hash_map<int, tensorflow::profiler::XLine*> xlines;
 
   for (const auto& z : worker.GetSourceLocationZones()) {
     ToXplane(worker, z.first, z.second, *xplane, xlines);
