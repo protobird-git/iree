@@ -20,6 +20,8 @@ namespace {
 
 constexpr int kGpuThreadIndicator = 1 << 16;
 
+// Templete overloads to return T either from T or from tracy::short_ptr<T>
+// which is useful to get T from tracy::Vector<>, e.g. thread timeline.
 template <typename T>
 const T& GetEvent(const T& event) { return event; }
 
@@ -28,6 +30,9 @@ const T& GetEvent(const tracy::short_ptr<T>& event) {
   return *event;
 }
 
+// Sum of durations of zones in a timeline. A timeline of a zone consists of
+// sub-zones enclosed within the given zone, e.g. a function calling functions.
+// A thread has a timeline with top-level zones, i.e. ones without parent zones.
 template <typename T>
 int64_t SumDurationInTimeline(const tracy::Worker& worker,
                               const tracy::Vector<T>& timeline) {
@@ -39,6 +44,16 @@ int64_t SumDurationInTimeline(const tracy::Worker& worker,
   return duration;
 }
 
+// Decompresses the thread ID associated to a GPU zone if it looks like a
+// compressed thread ID. If not, looks for the thread ID from GPU contexts.
+//
+// Each GPU zone is associated to a CPU thread issuing it. When tracy is
+// collecting live events, a valid compressed thread ID is set to GPU zones.
+// When tracy writes events to a file, it writes the uncompressed thread id
+// (int64_t) inproperly as a compressed thread id (uint16_t). So, when a GPU
+// zone is rebuilt from a tracy file, GPU thread information is wrong.
+// This function looks through GPU contexts and matches last 16bits, i.e. the
+// size of uint16_t to figure out the original thread ID.
 uint64_t DecompressOrFixGpuThreadId(const tracy::Worker& worker,
                                     uint16_t gpu_thread_id) {
   if (gpu_thread_id < worker.GetThreadData().size()) {
@@ -108,6 +123,10 @@ int64_t GetThreadDuration<tracy::Worker::SourceLocationZones>(
     const tracy::Worker& worker,
     int thread_id) {
   const auto* data = worker.GetThreadData(worker.DecompressThread(thread_id));
+  // timeline.is_magic() is false when tracy is collecting live events, i.e.
+  // storing zone events in a vector indirectly via tracy::short_ptr.
+  // timeline.is_magic() is true when zone events were from tracy file, i.e.
+  // stored in a vector directly.
   if (!data->timeline.is_magic()) {
     return SumDurationInTimeline(worker, data->timeline);
   }
@@ -126,6 +145,8 @@ int64_t GetThreadDuration<tracy::Worker::GpuSourceLocationZones>(
   for (const auto& d : worker.GetGpuData()) {
     for (const auto& t : d->threadData) {
       if (t.first == fixed_id) {
+        // See GetThreadDuration<tracy::Worker::SourceLocationZones>() for the
+        // comment about timeline.is_magic().
         if (!t.second.timeline.is_magic()) {
           return SumDurationInTimeline(worker, t.second.timeline);
         }

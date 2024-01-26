@@ -39,6 +39,8 @@ template <>
 std::string GetThreadName<tracy::Worker::GpuSourceLocationZones>(
     const tracy::Worker& worker, int thread_id);
 
+// Returns the total duration of the thread of |thread_id|. It is the sum of
+// durations of top-level zones.
 template <typename T>
 int64_t GetThreadDuration(const tracy::Worker& worker, int thread_id);
 template <>
