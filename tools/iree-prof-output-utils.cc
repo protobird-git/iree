@@ -20,16 +20,6 @@ namespace {
 
 constexpr int kGpuThreadIndicator = 1 << 16;
 
-// Templete overloads to return T either from T or from tracy::short_ptr<T>
-// which is useful to get T from tracy::Vector<>, e.g. thread timeline.
-template <typename T>
-const T& GetEvent(const T& event) { return event; }
-
-template <typename T>
-const T& GetEvent(const tracy::short_ptr<T>& event) {
-  return *event;
-}
-
 // Sum of durations of zones in a timeline. A timeline of a zone consists of
 // sub-zones enclosed within the given zone, e.g. a function calling functions.
 // A thread has a timeline with top-level zones, i.e. ones without parent zones.
@@ -87,6 +77,16 @@ int64_t GetEventEnd(const tracy::GpuEvent& event) {
   return event.GpuEnd();
 }
 
+const tracy::Vector<tracy::short_ptr<tracy::ZoneEvent>>* GetEventChildren(
+    const tracy::Worker& worker, const tracy::ZoneEvent& event) {
+  return event.HasChildren() ? &worker.GetZoneChildren(event.Child()) : nullptr;
+}
+
+const tracy::Vector<tracy::short_ptr<tracy::GpuEvent>>* GetEventChildren(
+    const tracy::Worker& worker, const tracy::GpuEvent& event) {
+  return event.Child() >= 0 ? &worker.GetGpuChildren(event.Child()) : nullptr;
+}
+
 int GetThreadId(const tracy::Worker::ZoneThreadData& t) {
   return t.Thread();
 }
@@ -96,16 +96,14 @@ int GetThreadId(const tracy::Worker::GpuZoneThreadData& t) {
 }
 
 template <>
-std::string GetThreadName<tracy::Worker::SourceLocationZones>(
-    const tracy::Worker& worker,
-    int thread_id) {
+std::string GetThreadName<tracy::ZoneEvent>(const tracy::Worker& worker,
+                                            int thread_id) {
   return worker.GetThreadName(worker.DecompressThread(thread_id));
 }
 
 template <>
-std::string GetThreadName<tracy::Worker::GpuSourceLocationZones>(
-    const tracy::Worker& worker,
-    int thread_id) {
+std::string GetThreadName<tracy::GpuEvent>(const tracy::Worker& worker,
+                                           int thread_id) {
   uint16_t original_id = thread_id - kGpuThreadIndicator;
   int fixed_id = DecompressOrFixGpuThreadId(worker, original_id);
   for (const auto& d : worker.GetGpuData()) {
@@ -116,6 +114,18 @@ std::string GetThreadName<tracy::Worker::GpuSourceLocationZones>(
     }
   }
   return absl::StrCat("gpu-thread-", fixed_id);
+}
+
+template <>
+std::string GetThreadName<tracy::Worker::SourceLocationZones>(
+    const tracy::Worker& worker, int thread_id) {
+  return GetThreadName<tracy::ZoneEvent>(worker, thread_id);
+}
+
+template <>
+std::string GetThreadName<tracy::Worker::GpuSourceLocationZones>(
+    const tracy::Worker& worker, int thread_id) {
+  return GetThreadName<tracy::GpuEvent>(worker, thread_id);
 }
 
 template <>

@@ -15,7 +15,18 @@
 
 namespace iree_prof {
 
-// Polymorphizm functions for CPU and GPU zones.
+// Function templates and overloads for CPU and GPU zones.
+
+// Templete overloads to return T either from T or from tracy::short_ptr<T>
+// which is useful to get T from tracy::Vector<>, e.g. thread timeline.
+template <typename T>
+const T& GetEvent(const T& event) { return event; }
+
+template <typename T>
+const T& GetEvent(const tracy::short_ptr<T>& event) {
+  return *event;
+}
+
 int64_t GetEventStart(const tracy::ZoneEvent& event);
 int64_t GetEventStart(const tracy::GpuEvent& event);
 
@@ -27,11 +38,22 @@ int64_t GetEventDuration(const T& event) {
   return GetEventEnd(event) - GetEventStart(event);
 }
 
+const tracy::Vector<tracy::short_ptr<tracy::ZoneEvent>>* GetEventChildren(
+    const tracy::Worker& worker, const tracy::ZoneEvent& event);
+const tracy::Vector<tracy::short_ptr<tracy::GpuEvent>>* GetEventChildren(
+    const tracy::Worker& worker, const tracy::GpuEvent& event);
+
 int GetThreadId(const tracy::Worker::ZoneThreadData& t);
 int GetThreadId(const tracy::Worker::GpuZoneThreadData& t);
 
 template <typename T>
 std::string GetThreadName(const tracy::Worker& worker, int thread_id);
+template <>
+std::string GetThreadName<tracy::ZoneEvent>(const tracy::Worker& worker,
+                                            int thread_id);
+template <>
+std::string GetThreadName<tracy::GpuEvent>(const tracy::Worker& worker,
+                                           int thread_id);
 template <>
 std::string GetThreadName<tracy::Worker::SourceLocationZones>(
     const tracy::Worker& worker, int thread_id);
