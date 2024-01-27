@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "tools/iree-prof-output-json.h"
+#include "tools/iree-prof-output-chrome.h"
 
 #include <cstdint>
 #include <fstream>
@@ -18,6 +18,10 @@
 
 namespace iree_prof {
 namespace {
+
+// Chrome tracing viewer (https://github.com/catapult-project/catapult) format
+// is described in
+// https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/edit?usp=sharing.
 
 constexpr int kPidFake = 0;
 
@@ -105,7 +109,8 @@ void OutputTimeline(const tracy::Worker& worker,
   }
 }
 
-// Outputs the zone events running on a (CPU or GPU) thread into a JSON file.
+// Outputs the zone events running on a (CPU or GPU) thread into a chrome
+// tracing viewer JSON file.
 // A thread is represented by a root timeline and its compressed thread ID.
 template <typename T>
 void OutputThread(const tracy::Worker& worker,
@@ -123,7 +128,7 @@ void OutputThread(const tracy::Worker& worker,
   OutputTimeline(worker, thread_id, timeline, fout);
 }
 
-// Outputs a tracy worker into a JSON file.
+// Outputs a tracy worker into a chrome tracing viewer JSON file.
 void OutputJson(const tracy::Worker& worker, std::fstream& fout) {
   fout << "[\n";
   OutputEvent("process_name", {}, kTypeMetadata, 0, 0,
@@ -145,12 +150,12 @@ void OutputJson(const tracy::Worker& worker, std::fstream& fout) {
 
 }  // namespace
 
-IreeProfOutputJson::IreeProfOutputJson(absl::string_view output_file_path)
+IreeProfOutputChrome::IreeProfOutputChrome(absl::string_view output_file_path)
     : output_file_path_(output_file_path) {}
 
-IreeProfOutputJson::~IreeProfOutputJson() = default;
+IreeProfOutputChrome::~IreeProfOutputChrome() = default;
 
-absl::Status IreeProfOutputJson::Output(tracy::Worker& worker) {
+absl::Status IreeProfOutputChrome::Output(tracy::Worker& worker) {
   std::fstream fout(output_file_path_.c_str(), std::ios::out|std::ios::binary);
   OutputJson(worker, fout);
   return absl::OkStatus();

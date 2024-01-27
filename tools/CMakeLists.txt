@@ -231,14 +231,14 @@ iree_cc_library(
     iree-prof-output
   HRDS
     "iree-prof-output.h"
-    "iree-prof-output-json.h"
+    "iree-prof-output-chrome.h"
     "iree-prof-output-stdout.h"
     "iree-prof-output-tracy.h"
     "iree-prof-output-utils.h"
     "iree-prof-output-xplane.h"
   SRCS
     "iree-prof-output.cc"
-    "iree-prof-output-json.cc"
+    "iree-prof-output-chrome.cc"
     "iree-prof-output-stdout.cc"
     "iree-prof-output-tracy.cc"
     "iree-prof-output-utils.cc"
