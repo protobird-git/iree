@@ -10,7 +10,6 @@
 #include <fstream>
 
 #include "build_tools/third_party/tsl/xplane.pb.h"
-#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 #include "third_party/abseil-cpp/absl/strings/str_cat.h"
 #include "third_party/abseil-cpp/absl/strings/string_view.h"
 #include "third_party/tracy/server/TracyWorker.hpp"
@@ -19,37 +18,81 @@
 namespace iree_prof {
 namespace {
 
+// Forward decl.
 template <typename T>
-void ToXplane(
-    const tracy::Worker& worker,
-    int64_t zone_id,
-    const T& zone,
-    tensorflow::profiler::XPlane& xplane,
-    absl::flat_hash_map<int, tensorflow::profiler::XLine*>& xlines) {
-  auto& event_metadata = (*xplane.mutable_event_metadata())[zone_id];
-  event_metadata.set_id(zone_id);
-  event_metadata.set_name(GetZoneName(worker, zone_id));
-  event_metadata.set_display_name(event_metadata.name());
+void ThreadToXline(const tracy::Worker& worker,
+                   const tracy::Vector<tracy::short_ptr<T>>& timeline,
+                   tensorflow::profiler::XPlane& xplane,
+                   tensorflow::profiler::XLine& xline);
 
-  for (const auto& t : zone.zones) {
-    auto tid = GetThreadId(t);
-    if (!xlines.contains(tid)) {
-      auto* xline = xplane.add_lines();
-      xline->set_id(tid);
-      xline->set_display_id(tid);
-      xline->set_name(GetThreadName<T>(worker, tid));
-      xline->set_display_name(xline->name());
-      // Need to set xline->set_timestamp_ns() and xline->set_duration_ps()?
-      xlines[tid] = xline;
+// Adds the zone events from a given timeline and its child timelines as Xlines.
+template <typename T>
+void RealThreadToXline(const tracy::Worker& worker,
+                       const tracy::Vector<T>& timeline,
+                       tensorflow::profiler::XPlane& xplane,
+                       tensorflow::profiler::XLine& xline) {
+  for (const auto& e : timeline) {
+    const auto& zone_event = GetEvent(e);
+    auto zone_id = zone_event.SrcLoc();
+
+    auto& event_metadata = (*xplane.mutable_event_metadata())[zone_id];
+    if (event_metadata.id() != zone_id) {
+      event_metadata.set_id(zone_id);
+      event_metadata.set_name(GetZoneName(worker, zone_id));
+      event_metadata.set_display_name(event_metadata.name());
     }
 
-    auto* event = xlines[tid]->add_events();
+    auto* event = xline.add_events();
     event->set_metadata_id(zone_id);
-    event->set_offset_ps(GetEventStart(*t.Zone()) * 1000);
-    event->set_duration_ps(GetEventDuration(*t.Zone()) * 1000);
+    event->set_offset_ps(GetEventStart(zone_event) * 1000);
+    event->set_duration_ps(GetEventDuration(zone_event) * 1000);
+
+    auto* children = GetEventChildren(worker, zone_event);
+    if (children) {
+      ThreadToXline(worker, *children, xplane, xline);
+    }
   }
 }
 
+// Adds the zone events from a given timeline and its child timelines by the
+// help of RealThreadToXline(). It's to differentiate templates of
+// tracy::Vector<T> and ones of tracy::Vector<tracy::short_ptr<T>>.
+template <typename T>
+void ThreadToXline(const tracy::Worker& worker,
+                   const tracy::Vector<tracy::short_ptr<T>>& timeline,
+                   tensorflow::profiler::XPlane& xplane,
+                   tensorflow::profiler::XLine& xline) {
+  if (timeline.is_magic()) {
+    RealThreadToXline(worker,
+                      *reinterpret_cast<const tracy::Vector<T>*>(&timeline),
+                      xplane, xline);
+  } else {
+    RealThreadToXline(worker, timeline, xplane, xline);
+  }
+}
+
+// Adds the zone events running on a (CPU or GPU) thread into a JSON file.
+// A thread is represented by a root timeline and its compressed thread ID.
+template <typename T>
+void ThreadToXplane(const tracy::Worker& worker,
+                    uint16_t thread_id,
+                    const tracy::Vector<tracy::short_ptr<T>>& timeline,
+                    tensorflow::profiler::XPlane& xplane) {
+  if (timeline.empty()) {
+    return;
+  }
+
+  auto* xline = xplane.add_lines();
+  xline->set_id(thread_id);
+  xline->set_display_id(thread_id);
+  xline->set_name(GetThreadName<T>(worker, thread_id));
+  xline->set_display_name(xline->name());
+  // Need to set xline->set_timestamp_ns() and xline->set_duration_ps()?
+
+  ThreadToXline(worker, timeline, xplane, *xline);
+}
+
+// Returns an XSpace with an XPlane from a tracy worker.
 tensorflow::profiler::XSpace ToXplane(const tracy::Worker& worker) {
   tensorflow::profiler::XSpace xspace;
   auto* xplane = xspace.add_planes();
@@ -58,14 +101,16 @@ tensorflow::profiler::XSpace ToXplane(const tracy::Worker& worker) {
 
   // XLine corresponds to each Thread.
   // XEvent corresponds to each Zone.
-  absl::flat_hash_map<int, tensorflow::profiler::XLine*> xlines;
-
-  for (const auto& z : worker.GetSourceLocationZones()) {
-    ToXplane(worker, z.first, z.second, *xplane, xlines);
+  for (const auto* d : worker.GetThreadData()) {
+    ThreadToXplane(worker,
+                   const_cast<tracy::Worker*>(&worker)->CompressThread(d->id),
+                   d->timeline, *xplane);
   }
 
-  for (const auto& z : worker.GetGpuSourceLocationZones()) {
-    ToXplane(worker, z.first, z.second, *xplane, xlines);
+  for (const auto& g : worker.GetGpuData()) {
+    for (const auto& d : g->threadData) {
+      ThreadToXplane(worker, d.first, d.second.timeline, *xplane);
+    }
   }
 
   return xspace;

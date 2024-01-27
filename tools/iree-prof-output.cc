@@ -13,12 +13,16 @@
 #include "third_party/abseil-cpp/absl/log/log.h"
 #include "third_party/abseil-cpp/absl/status/status.h"
 #include "third_party/tracy/server/TracyWorker.hpp"
+#include "tools/iree-prof-output-chrome.h"
 #include "tools/iree-prof-output-stdout.h"
 #include "tools/iree-prof-output-tracy.h"
 #include "tools/iree-prof-output-xplane.h"
 
 ABSL_FLAG(std::string, output_tracy_file, "",
           "Tracy file to write as the output of the given executable command.");
+ABSL_FLAG(std::string, output_chrome_file, "",
+          "Chrome tracing viewer json file to write as the output of execution "
+          "or conversion.");
 ABSL_FLAG(std::string, output_xplane_file, "",
           "Xplane file to write as the output of execution or conversion.");
 ABSL_FLAG(bool, output_stdout, true,
@@ -73,6 +77,11 @@ void Output(tracy::Worker& worker) {
   std::string output_tracy_file = absl::GetFlag(FLAGS_output_tracy_file);
   if (!output_tracy_file.empty()) {
     LogStatusIfError(IreeProfOutputTracy(output_tracy_file).Output(worker));
+  }
+
+  std::string output_chrome_file = absl::GetFlag(FLAGS_output_chrome_file);
+  if (!output_chrome_file.empty()) {
+    LogStatusIfError(IreeProfOutputChrome(output_chrome_file).Output(worker));
   }
 
   std::string output_xplane_file = absl::GetFlag(FLAGS_output_xplane_file);
