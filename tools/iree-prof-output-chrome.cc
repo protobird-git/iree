@@ -29,6 +29,12 @@ constexpr absl::string_view kTypeMetadata = "M";
 constexpr absl::string_view kTypeEventStart = "B";
 constexpr absl::string_view kTypeEventEnd = "E";
 
+std::string GetSourceFileLineOrUnknown(const tracy::Worker& worker,
+                                       int16_t source_location_id) {
+  auto file_line = GetSourceFileLine(worker, source_location_id);
+  return file_line.empty() ? "unknown" : file_line;
+}
+
 // Forward decl.
 template <typename T>
 void OutputTimeline(const tracy::Worker& worker,
@@ -79,7 +85,9 @@ void RealOutputTimeline(const tracy::Worker& worker,
 
     fout << ",\n";
     OutputEvent(GetZoneName(worker, zone_id), {}, kTypeEventStart,
-                GetEventStart(zone_event), thread_id, {}, fout);
+                GetEventStart(zone_event), thread_id,
+                {ToArgField("source", GetSourceFileLine(worker, zone_id))},
+                fout);
 
     auto* children = GetEventChildren(worker, zone_event);
     if (children) {

@@ -76,6 +76,13 @@ int64_t GetThreadDuration<tracy::Worker::GpuSourceLocationZones>(
 const char* GetZoneName(const tracy::Worker& worker,
                         int16_t source_location_id);
 
+// Gets source file:line string. May return an empty string if it is unknown.
+std::string GetSourceFileLine(const tracy::Worker& worker,
+                              int16_t source_location_id);
+
+// Gets plot data of memory usage.
+const tracy::PlotData* GetMemoryPlotData(const tracy::Worker& worker);
+
 // Yields CPU of current thread for a short while, 100 milliseconds.
 void YieldCpu();
 
