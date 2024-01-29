@@ -11,6 +11,7 @@
 #include "third_party/abseil-cpp/absl/log/globals.h"
 #include "third_party/abseil-cpp/absl/log/initialize.h"
 #include "third_party/abseil-cpp/absl/strings/str_cat.h"
+#include "third_party/abseil-cpp/absl/strings/string_view.h"
 #include "third_party/abseil-cpp/absl/time/clock.h"
 #include "third_party/abseil-cpp/absl/time/time.h"
 #include "third_party/tracy/server/TracyWorker.hpp"
@@ -173,6 +174,25 @@ int64_t GetThreadDuration<tracy::Worker::GpuSourceLocationZones>(
 const char* GetZoneName(const tracy::Worker& worker,
                         int16_t source_location_id) {
   return worker.GetZoneName(worker.GetSourceLocation(source_location_id));
+}
+
+std::string GetSourceFileLine(const tracy::Worker& worker,
+                              int16_t source_location_id) {
+  const auto& zone = worker.GetSourceLocation(source_location_id);
+  absl::string_view file_name = worker.GetString(zone.file);
+  if (file_name.empty() || file_name == "-") {
+    return "";
+  }
+  return absl::StrCat(file_name, ":", zone.line);
+}
+
+const tracy::PlotData* GetMemoryPlotData(const tracy::Worker& worker) {
+  for (const auto* p : worker.GetPlots()) {
+    if (p->type == tracy::PlotType::Memory) {
+      return p;
+    }
+  }
+  return nullptr;
 }
 
 void YieldCpu() {

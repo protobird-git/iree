@@ -34,6 +34,18 @@ const char* ArchToString(tracy::CpuArchitecture arch) {
   }
 }
 
+std::string MemToString(double mem_usage) {
+  if (mem_usage > 1000 * 1000 * 1000) {
+    return absl::StrCat(floor(mem_usage / 1000 / 1000 / 10 + 0.5) / 100,
+                        " GBytes");
+  } else if (mem_usage > 1000 * 1000) {
+    return absl::StrCat(floor(mem_usage / 1000 / 10 + 0.5) / 100, " MBytes");
+  } else if (mem_usage > 1000) {
+    return absl::StrCat(floor(mem_usage / 10 + 0.5) / 100, " KBytes");
+  }
+  return absl::StrCat(mem_usage, " Bytes");
+}
+
 // Whether |substrs| includes a substring of |str|.
 bool HasSubstr(absl::string_view str, const std::vector<std::string>& substrs) {
   return std::find_if(
@@ -296,9 +308,14 @@ IreeProfOutputStdout::IreeProfOutputStdout(
 IreeProfOutputStdout::~IreeProfOutputStdout() = default;
 
 absl::Status IreeProfOutputStdout::Output(tracy::Worker& worker) {
-  std::cout << "[TRACY    ]  CaptureName: " << worker.GetCaptureName() << "\n";
-  std::cout << "[TRACY    ]      CpuArch: " << ArchToString(worker.GetCpuArch())
+  std::cout << "[TRACY    ] Capture Name: " << worker.GetCaptureName() << "\n";
+  std::cout << "[TRACY    ]     Cpu Arch: " << ArchToString(worker.GetCpuArch())
             << "\n";
+
+  const auto* p = GetMemoryPlotData(worker);
+  if (p) {
+    std::cout << "[TRACY    ]   Max Memory: " << MemToString(p->max) << "\n";
+  }
 
   if (!worker.GetThreadData().empty()) {
     std::cout << "[TRACY    ]\n";
