@@ -35,12 +35,12 @@ const char* ArchToString(tracy::CpuArchitecture arch) {
 }
 
 std::string MemToString(double mem_usage) {
-  if (mem_usage > 1000 * 1000 * 1000) {
+  if (mem_usage >= 995 * 1000 * 1000) {
     return absl::StrCat(floor(mem_usage / 1000 / 1000 / 10 + 0.5) / 100,
                         " GBytes");
-  } else if (mem_usage > 1000 * 1000) {
+  } else if (mem_usage >= 995 * 1000) {
     return absl::StrCat(floor(mem_usage / 1000 / 10 + 0.5) / 100, " MBytes");
-  } else if (mem_usage > 1000) {
+  } else if (mem_usage >= 995) {
     return absl::StrCat(floor(mem_usage / 10 + 0.5) / 100, " KBytes");
   }
   return absl::StrCat(mem_usage, " Bytes");
