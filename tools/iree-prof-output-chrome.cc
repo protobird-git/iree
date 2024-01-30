@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <string>
 #include <vector>
 
 #include "third_party/abseil-cpp/absl/strings/str_cat.h"
@@ -35,20 +36,83 @@ std::string GetSourceFileLineOrUnknown(const tracy::Worker& worker,
   return file_line.empty() ? "unknown" : file_line;
 }
 
-// Forward decl.
-template <typename T>
-void OutputTimeline(const tracy::Worker& worker,
-                    uint16_t thread_id,
-                    const tracy::Vector<tracy::short_ptr<T>>& timeline,
-                    std::fstream& fout);
+// Returns 2 ordered vector of memory events according to alloc/free timestamp.
+void SortMemEvents(const tracy::Worker& worker,
+                   std::vector<const tracy::MemEvent*>& sorted_by_alloc,
+                   std::vector<const tracy::MemEvent*>& sorted_by_free) {
+  for (const auto& m : worker.GetMemNameMap()) {
+    for (const auto& e : m.second->data) {
+      sorted_by_alloc.push_back(&e);
+      sorted_by_free.push_back(&e);
+    }
+  }
+
+  std::sort(sorted_by_alloc.begin(), sorted_by_alloc.end(),
+            [](const tracy::MemEvent* a, const tracy::MemEvent* b) {
+              return a->TimeAlloc() < b->TimeAlloc();
+            });
+  std::sort(sorted_by_free.begin(), sorted_by_free.end(),
+            [](const tracy::MemEvent* a, const tracy::MemEvent* b) {
+              return a->TimeFree() < b->TimeFree();
+            });
+}
+
+// Gets mem stats from a zone event.
+struct ZoneMemStat {
+  int64_t num_allocs;   // # of memory allocations within the zone.
+  int64_t num_frees;    // # of memory deallocations within the zone.
+  int64_t size_allocs;  // Sum of memory sizes of allocations.
+  int64_t size_frees;   // Sum of memory sizes of deallocations.
+};
+
+ZoneMemStat GetZoneMemStat(
+    const std::vector<const tracy::MemEvent*>& sorted_by_alloc,
+    const std::vector<const tracy::MemEvent*>& sorted_by_free,
+    uint16_t thread_id,
+    int64_t start,
+    int64_t end) {
+  ZoneMemStat stat = {};
+
+  auto it_alloc =
+      std::lower_bound(sorted_by_alloc.begin(), sorted_by_alloc.end(), start,
+                       [](const tracy::MemEvent* a, int64_t start) {
+                         return a->TimeAlloc() < start;
+                       });
+  for (; it_alloc != sorted_by_alloc.end(); ++it_alloc) {
+    if (end < (*it_alloc)->TimeAlloc()) {
+      break;
+    }
+    if (thread_id == (*it_alloc)->ThreadAlloc()) {
+      ++stat.num_allocs;
+      stat.size_allocs += (*it_alloc)->Size();
+    }
+  }
+
+  auto it_free =
+      std::lower_bound(sorted_by_free.begin(), sorted_by_free.end(), start,
+                       [](const tracy::MemEvent* a, int64_t start) {
+                         return a->TimeFree() < start;
+                       });
+  for (; it_free != sorted_by_free.end(); ++it_free) {
+    if (end < (*it_free)->TimeFree()) {
+      break;
+    }
+    if (thread_id == (*it_free)->ThreadFree()) {
+      ++stat.num_frees;
+      stat.size_frees += (*it_free)->Size();
+    }
+  }
+
+  return stat;
+}
 
 // Outputs a zone event as a JSON array entry.
 void OutputEvent(absl::string_view name,
-                 std::vector<absl::string_view> categories,
+                 std::vector<std::string> categories,
                  absl::string_view event_type,
                  int64_t timestamp_ns,
                  int thread_id,
-                 std::vector<absl::string_view> args,
+                 std::vector<std::string> args,
                  std::fstream& fout) {
   fout << "{";
   if (!name.empty()) {
@@ -68,35 +132,61 @@ void OutputEvent(absl::string_view name,
 }
 
 // Returns a JSON key-value pair used for an event argument.
-std::string ToArgField(absl::string_view key, absl::string_view value) {
-  return absl::StrCat("\"", key, "\": \"", value, "\"");
+std::string ToArgField(absl::string_view key, absl::string_view str_value) {
+  return absl::StrCat("\"", key, "\": \"", str_value, "\"");
 }
+
+std::string ToArgField(absl::string_view key, int64_t int_value) {
+  return absl::StrCat("\"", key, "\": ", int_value);
+}
+
+// Forward decl.
+template <typename T>
+void OutputTimeline(const tracy::Worker& worker,
+                    const std::vector<const tracy::MemEvent*>& sorted_by_alloc,
+                    const std::vector<const tracy::MemEvent*>& sorted_by_free,
+                    uint16_t thread_id,
+                    const tracy::Vector<tracy::short_ptr<T>>& timeline,
+                    std::fstream& fout);
 
 // Outputs the zone events from a timeline which might be interleaved by zone
 // events of the child timelines.
 template <typename T>
-void RealOutputTimeline(const tracy::Worker& worker,
-                        uint16_t thread_id,
-                        const tracy::Vector<T>& timeline,
-                        std::fstream& fout) {
+void RealOutputTimeline(
+    const tracy::Worker& worker,
+    const std::vector<const tracy::MemEvent*>& sorted_by_alloc,
+    const std::vector<const tracy::MemEvent*>& sorted_by_free,
+    uint16_t thread_id,
+    const tracy::Vector<T>& timeline,
+    std::fstream& fout) {
   for (const auto& e : timeline) {
     const auto& zone_event = GetEvent(e);
     auto zone_id = zone_event.SrcLoc();
+    auto start = GetEventStart(zone_event);
+    auto end = GetEventEnd(zone_event);
+
+    std::vector<std::string> args;
+    args.push_back(ToArgField("source", GetSourceFileLine(worker, zone_id)));
+
+    auto mem_stat =
+        GetZoneMemStat(sorted_by_alloc, sorted_by_free, thread_id, start, end);
+    args.push_back(ToArgField("num_allocs", mem_stat.num_allocs));
+    args.push_back(ToArgField("num_frees", mem_stat.num_frees));
+    args.push_back(ToArgField("size_allocs", mem_stat.size_allocs));
+    args.push_back(ToArgField("size_frees", mem_stat.size_frees));
 
     fout << ",\n";
-    OutputEvent(GetZoneName(worker, zone_id), {}, kTypeEventStart,
-                GetEventStart(zone_event), thread_id,
-                {ToArgField("source", GetSourceFileLine(worker, zone_id))},
-                fout);
+    OutputEvent(worker.GetZoneName(zone_event), {}, kTypeEventStart, start,
+                thread_id, args, fout);
 
     auto* children = GetEventChildren(worker, zone_event);
     if (children) {
-      OutputTimeline(worker, thread_id, *children, fout);
+      OutputTimeline(worker, sorted_by_alloc, sorted_by_free, thread_id,
+                     *children, fout);
     }
 
     fout << ",\n";
-    OutputEvent("", {}, kTypeEventEnd, GetEventEnd(zone_event), thread_id, {},
-                fout);
+    OutputEvent("", {}, kTypeEventEnd, end, thread_id, {}, fout);
   }
 }
 
@@ -105,15 +195,18 @@ void RealOutputTimeline(const tracy::Worker& worker,
 // and ones of tracy::Vector<tracy::short_ptr<T>>.
 template <typename T>
 void OutputTimeline(const tracy::Worker& worker,
+                    const std::vector<const tracy::MemEvent*>& sorted_by_alloc,
+                    const std::vector<const tracy::MemEvent*>& sorted_by_free,
                     uint16_t thread_id,
                     const tracy::Vector<tracy::short_ptr<T>>& timeline,
                     std::fstream& fout) {
   if (timeline.is_magic()) {
-    RealOutputTimeline(worker, thread_id,
+    RealOutputTimeline(worker, sorted_by_alloc, sorted_by_free, thread_id,
                        *reinterpret_cast<const tracy::Vector<T>*>(&timeline),
                        fout);
   } else {
-    RealOutputTimeline(worker, thread_id, timeline, fout);
+    RealOutputTimeline(worker, sorted_by_alloc, sorted_by_free, thread_id,
+                       timeline, fout);
   }
 }
 
@@ -122,6 +215,8 @@ void OutputTimeline(const tracy::Worker& worker,
 // A thread is represented by a root timeline and its compressed thread ID.
 template <typename T>
 void OutputThread(const tracy::Worker& worker,
+                  const std::vector<const tracy::MemEvent*>& sorted_by_alloc,
+                  const std::vector<const tracy::MemEvent*>& sorted_by_free,
                   uint16_t thread_id,
                   const tracy::Vector<tracy::short_ptr<T>>& timeline,
                   std::fstream& fout) {
@@ -133,7 +228,8 @@ void OutputThread(const tracy::Worker& worker,
   OutputEvent("thread_name", {}, kTypeMetadata, 0, thread_id,
               {ToArgField("name", GetThreadName<T>(worker, thread_id))}, fout);
 
-  OutputTimeline(worker, thread_id, timeline, fout);
+  OutputTimeline(worker, sorted_by_alloc, sorted_by_free, thread_id, timeline,
+                 fout);
 }
 
 // Outputs a tracy worker into a chrome tracing viewer JSON file.
@@ -142,15 +238,20 @@ void OutputJson(const tracy::Worker& worker, std::fstream& fout) {
   OutputEvent("process_name", {}, kTypeMetadata, 0, 0,
               {ToArgField("name", worker.GetCaptureName())}, fout);
 
+  std::vector<const tracy::MemEvent*> sorted_by_alloc;
+  std::vector<const tracy::MemEvent*> sorted_by_free;
+  SortMemEvents(worker, sorted_by_alloc, sorted_by_free);
+
   for (const auto* d : worker.GetThreadData()) {
-    OutputThread(worker,
+    OutputThread(worker, sorted_by_alloc, sorted_by_free,
                  const_cast<tracy::Worker*>(&worker)->CompressThread(d->id),
                  d->timeline, fout);
   }
 
   for (const auto& g : worker.GetGpuData()) {
     for (const auto& d : g->threadData) {
-      OutputThread(worker, d.first, d.second.timeline, fout);
+      OutputThread(worker, sorted_by_alloc, sorted_by_free, d.first,
+                   d.second.timeline, fout);
     }
   }
   fout << "\n]\n";

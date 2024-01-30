@@ -312,11 +312,6 @@ absl::Status IreeProfOutputStdout::Output(tracy::Worker& worker) {
   std::cout << "[TRACY    ]     Cpu Arch: " << ArchToString(worker.GetCpuArch())
             << "\n";
 
-  const auto* p = GetMemoryPlotData(worker);
-  if (p) {
-    std::cout << "[TRACY    ]   Max Memory: " << MemToString(p->max) << "\n";
-  }
-
   if (!worker.GetThreadData().empty()) {
     std::cout << "[TRACY    ]\n";
     std::cout << "[TRACY-CPU]  CPU Threads: " << worker.GetThreadData().size()
@@ -337,6 +332,22 @@ absl::Status IreeProfOutputStdout::Output(tracy::Worker& worker) {
               << "\n";
     OutputToStdout(worker, worker.GetGpuSourceLocationZones(), zone_substrs_,
                    thread_substrs_, "[TRACY-GPU]", unit_);
+  }
+
+  if (!worker.GetMemNameMap().empty()) {
+    std::cout << "[TRACY    ]\n";
+    const auto* p = GetMemoryPlotData(worker);
+    if (p) {
+      std::cout << "[TRACY-MEM]   Max Memory: " << MemToString(p->max) << "\n";
+    }
+    std::cout << "[TRACY-MEM]   Allocators: " << worker.GetMemNameMap().size()
+              << "\n";
+    for (const auto& m : worker.GetMemNameMap()) {
+      std::cout << "[TRACY-MEM]        Alloc: name="
+                << (m.first == 0 ? "default" : worker.GetString(m.first))
+                << ", events=" << m.second->data.size()
+                << "\n";
+    }
   }
 
   return absl::OkStatus();

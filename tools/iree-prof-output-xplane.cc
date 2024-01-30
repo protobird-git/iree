@@ -38,7 +38,7 @@ void RealThreadToXline(const tracy::Worker& worker,
     auto& event_metadata = (*xplane.mutable_event_metadata())[zone_id];
     if (event_metadata.id() != zone_id) {
       event_metadata.set_id(zone_id);
-      event_metadata.set_name(GetZoneName(worker, zone_id));
+      event_metadata.set_name(worker.GetZoneName(zone_event));
       event_metadata.set_display_name(event_metadata.name());
     }
 
